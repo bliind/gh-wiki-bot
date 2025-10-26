@@ -6,27 +6,63 @@ from discord import app_commands
 from discord.ext import commands
 
 MAX_MESSAGE_LENGTH = 2000
-
-IMAGE_REGEX = r'(.*)\n\n(!\[.+?\]\(.+?\))(\s*.*)'
+TOKEN_REGEX = r'(\s+)|(\!?\[.*?\]\(.*?\))|([^\s\!?\[\]()]+)'
+IMAGE_REGEX = r'(.*?)\n\n(!\[.+?\]\(.+?\))(\s*.*)'
 
 def split_message(message):
     out = ['']
     lines = message.split('\n')
+    max_safe_content_size = MAX_MESSAGE_LENGTH - 1 
 
     for line in lines:
-        to_add = f'\n{line}'
-        curr_length = len(out[-1])
+        if len(line) > max_safe_content_size:
+            tokens = [m.group(0) for m in re.finditer(TOKEN_REGEX, line, re.DOTALL)]
 
-        new_length = curr_length + len(to_add)
-        if new_length > MAX_MESSAGE_LENGTH:
-            out.append(to_add)
+            for token in tokens:
+                content_to_add = token
+
+                if len(content_to_add) > MAX_MESSAGE_LENGTH:
+                    current_pos = 0
+                    while current_pos < len(content_to_add):
+                        chunk = content_to_add[current_pos : current_pos + MAX_MESSAGE_LENGTH]
+
+                        if len(out[-1]) + len(chunk) > MAX_MESSAGE_LENGTH:
+                            out.append(chunk)
+                        else:
+                            out[-1] += chunk
+                        current_pos += MAX_MESSAGE_LENGTH
+                    continue
+
+                is_whitespace = content_to_add.isspace()
+
+                prefix = ""
+                if (not is_whitespace and
+                    not out[-1].endswith((' ', '\n')) and
+                    not content_to_add.startswith((',', '.', '!', '?', ':', ';'))):
+                    prefix = " "
+
+                content_with_prefix = prefix + content_to_add
+                new_length = len(out[-1]) + len(content_with_prefix)
+
+                if new_length > MAX_MESSAGE_LENGTH:
+                    out.append(content_to_add)
+                else:
+                    out[-1] += content_with_prefix
+
         else:
-            out[-1] += to_add
+            to_add = f'\n{line}'
+            curr_length = len(out[-1])
+            new_length = curr_length + len(to_add)
+
+            if new_length > MAX_MESSAGE_LENGTH:
+                out.append(to_add)
+            else:
+                out[-1] += to_add
 
     if out[0] and out[0].startswith('\n'):
         out[0] = out[0][1:]
 
-    return out
+    return [s for s in out if s.strip()]
 
 def gh_markdown_to_discord(messages):
     i = 0
@@ -41,8 +77,6 @@ def gh_markdown_to_discord(messages):
             messages[i] = before + image
             if rest:
                 messages.insert(i + 1, rest)
-                i += 2
-            else:
                 i += 1
         else:
             i += 1
