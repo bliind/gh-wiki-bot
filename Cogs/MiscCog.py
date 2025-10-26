@@ -7,7 +7,7 @@ from discord.ext import commands
 
 MAX_MESSAGE_LENGTH = 2000
 TOKEN_REGEX = r'(\s+)|(\!?\[.*?\]\(.*?\))|([^\s\!?\[\]()]+)'
-IMAGE_REGEX = r'(.*?)\n\n(!\[.+?\]\(.+?\))(\s*.*)'
+IMAGE_REGEX = r'(.*?)(!\[.+?\]\(.+?\))(\s*.*)'
 
 def split_message(message):
     out = ['']
