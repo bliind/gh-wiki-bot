@@ -1,7 +1,9 @@
+import io
 import re
 import asyncio
 import requests
 import discord
+import aiohttp
 from discord import app_commands
 from discord.ext import commands
 
@@ -100,6 +102,31 @@ def convert_and_split(content):
 
     return messages
 
+async def image_to_file(url):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = io.BytesIO(await resp.read())
+            return discord.File(data, f"{url.split('/')[-1]}")
+
+async def attach_images(messages):
+    imgex = r'\n\n(\[⠀\]\((.+?)\))'
+    out = []
+    for message in messages:
+        match = re.search(imgex, message)
+        if match:
+            url = match.group(2)
+            image = await image_to_file(url)
+            out.append({
+                "content": message.replace(match.group(1), ''),
+                "attachment": image
+            })
+        else:
+            out.append({
+                "content": message
+            })
+
+    return out
+
 class MiscCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -112,21 +139,33 @@ class MiscCog(commands.Cog):
         resp = requests.get(self.base_url + filename)
         return resp.text
 
-    @app_commands.command(name='fetch_article', description='Fetch a specific article')
-    async def fetch_article_command(self, interaction: discord.Interaction, filename: str):
-        await interaction.response.defer(ephemeral=True)
-
+    async def fetch_and_fill(self, interaction, filename):
         try:
             content = await self.fetch_article(filename)
             messages = convert_and_split(content)
-            for message in messages:
-                await interaction.channel.send(message)
+            messages_with_images = await attach_images(messages)
+
+            for message in messages_with_images:
+                if re.search(r'<@\d+>', message['content']):
+                    msg = await interaction.channel.send('temp')
+                    await msg.edit(content=message['content'])
+                else:
+                    if 'attachment' in message:
+                        await interaction.channel.send(message['content'], files=[message['attachment']])
+                    else:
+                        await interaction.channel.send(message['content'])
 
             await interaction.delete_original_response()
         except Exception as e:
             await interaction.edit_original_response(content='Something went wrong, sorry!')
             print(f'Failed to fetch article at {filename}:')
-            print(e)
+            raise e
+
+    @app_commands.command(name='fetch_article', description='Fetch a specific article')
+    async def fetch_article_command(self, interaction: discord.Interaction, filename: str):
+        await interaction.response.defer(ephemeral=True)
+
+        await self.fetch_and_fill(interaction, filename)
 
     @app_commands.command(name='replace_article', description='Delete the current article and fetch a specific one')
     async def replace_article_command(self, interaction: discord.Interaction, filename: str):
@@ -142,15 +181,5 @@ class MiscCog(commands.Cog):
             await asyncio.sleep(0.5)
             i += 1
 
-        # pull article content
-        try:
-            content = await self.fetch_article(filename)
-            messages = convert_and_split(content)
-            for message in messages:
-                await interaction.channel.send(message)
-
-            await interaction.delete_original_response()
-        except Exception as e:
-            await interaction.edit_original_response(content='Something went wrong, sorry!')
-            print(f'Failed to fetch article at {filename}:')
-            print(e)
+        await asyncio.sleep(1.5)
+        await self.fetch_and_fill(interaction, filename)
